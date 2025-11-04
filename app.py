@@ -1,17 +1,16 @@
 import streamlit as st
 import random
 from collections import deque
-from sklearn.metrics import accuracy_score
-from openai import OpenAI
+from sklearn.metrics import accuracy_score, f1_score
 import matplotlib.pyplot as plt
+from openai import OpenAI
 
-# --------- Prompt-MII Logic, with Simple Self-Consistency Booster ---------
+# --------- Prompt-MII Logic, with Self-Consistency/Votes ---------
 def prompt_mii_instruction(subject, choices):
     choices_str = ", ".join(choices)
     return f"Task: {subject}. Choose from [{choices_str}]. Use contextual/logical clues."
 
 def classify_prompt_mii(question, choices, n_votes=5):
-    # Self-ensemble: repeat n_votes times and take majority answer
     votes = []
     for _ in range(n_votes):
         found = False
@@ -84,19 +83,10 @@ st.title("Prompt-MII vs Classic Prompting: Live AI Portal")
 with st.expander("How to use this Prompting Demo", expanded=True):
     st.markdown("""
 **Step-by-step instructions:**
-
-1. **Pick an example or enter your own task:** Use the 'Example' button to prefill typical business/tech scenarios, or test custom tasks.
-2. **Choose a subject/domain** to provide context for Prompt-MII.
-3. **Enter your question or task**.
-4. **List your answer choices, comma separated** (e.g., `Yes,No,Unclear`).
-5. **Provide the correct answer** for validation.
-6. _(Optional)_ Add your OpenAI API key if you want GPT-3.5/4 live LLM answers.
-7. **Click 'Run Demo'** to get predictions, token efficiency, all accuracy metrics, and visualization of your results.
-8. **Check the plot at the bottom** to see how Prompt-MII's accuracy (with boosting) improves over your testing session.
-
-For highest accuracy, try different voting/ensemble settings in the sidebar.
-
-**Sample business/tech cases available below.**
+- Pick or enter your scenario and choices.
+- Input the correct answer.
+- Optionally, provide your OpenAI API key for full LLM power.
+- Click Run—get predictions, real-time F1, accuracy, and business-relevant metrics for every prompt method.
 """)
 
 # Example picker
@@ -129,11 +119,12 @@ api_key = st.text_input("OPTIONAL: Your OpenAI API Key (for live LLM):", type="p
 use_live_llm = st.checkbox("Use OpenAI LLM for Prompt-MII (requires API key)", value=False)
 
 # Boost settings
-n_votes = st.sidebar.slider("Prompt-MII Self-Consistency/Votes", min_value=1, max_value=21, value=5, step=2, help="Number of times to ensemble Prompt-MII outputs for accuracy boost.")
+n_votes = st.sidebar.slider("Prompt-MII Self-Consistency/Votes", min_value=1, max_value=21, value=5, step=2)
 
-# Accuracy history tracking
-if "mii_acc_hist" not in st.session_state: st.session_state.mii_acc_hist = deque(maxlen=20)
-if "llm_acc_hist" not in st.session_state: st.session_state.llm_acc_hist = deque(maxlen=20)
+# Accuracy and F1 history
+for k in ["mii_acc_hist", "classic_acc_hist", "rand_acc_hist", "llm_acc_hist",
+          "mii_f1_hist", "classic_f1_hist", "rand_f1_hist", "llm_f1_hist"]:
+    if k not in st.session_state: st.session_state[k] = deque(maxlen=20)
 
 if st.button("Run Demo"):
     if not question or not choices or not correct_answer:
@@ -146,21 +137,36 @@ if st.button("Run Demo"):
             st.stop()
 
         col1, col2, col3, col4 = st.columns(4)
+        
+        # Inference
         mii_pred = classify_prompt_mii(question, choices, n_votes=n_votes)
         random_pred = random_baseline(choices)
         classic_pred = classic_fewshot_answer(question, choices)
         mii_instruction = prompt_mii_instruction(subject, choices)
         classic_instruction = "Please read the question carefully and choose the best answer."
 
-        col1.metric("Prompt-MII (Ensemble)", choices[mii_pred])
+        # For F1: one label each (simulate batch)
+        y_true = [correct_idx]
+        preds = [mii_pred, classic_pred, random_pred]
+        mii_f1 = f1_score(y_true, [mii_pred], average='macro')
+        classic_f1 = f1_score(y_true, [classic_pred], average='macro')
+        random_f1 = f1_score(y_true, [random_pred], average='macro')
+
+        col1.metric("Prompt-MII (Ens)", choices[mii_pred])
         col2.metric("Classic (Sim)", choices[classic_pred])
         col3.metric("Random", choices[random_pred])
 
         col1.metric("Prompt-MII Accuracy", f"{int(mii_pred == correct_idx)}")
         st.session_state.mii_acc_hist.append(int(mii_pred == correct_idx))
+        st.session_state.mii_f1_hist.append(mii_f1)
         col2.metric("Classic Accuracy", f"{int(classic_pred == correct_idx)}")
+        st.session_state.classic_acc_hist.append(int(classic_pred == correct_idx))
+        st.session_state.classic_f1_hist.append(classic_f1)
         col3.metric("Random Accuracy", f"{int(random_pred == correct_idx)}")
+        st.session_state.rand_acc_hist.append(int(random_pred == correct_idx))
+        st.session_state.rand_f1_hist.append(random_f1)
 
+        llm_f1 = None
         if use_live_llm and api_key:
             try:
                 with st.spinner("Calling OpenAI LLM (Prompt-MII instruction)..."):
@@ -170,17 +176,19 @@ if st.button("Run Demo"):
                     )
                 col4.metric("Prompt-MII (OpenAI LLM)", choices[openai_idx])
                 acc = int(openai_idx == correct_idx)
+                f1 = f1_score(y_true, [openai_idx], average='macro')
                 col4.metric("OpenAI Accuracy", f"{acc}")
-                st.session_state.llm_acc_hist.append(acc)
                 st.code(f"OpenAI LLM raw: {openai_raw}", language="markdown")
+                st.session_state.llm_acc_hist.append(acc)
+                st.session_state.llm_f1_hist.append(f1)
+                llm_f1 = f1
             except Exception as e:
                 st.error(f"OpenAI API error: {e}")
-        else:
-            st.session_state.llm_acc_hist.append(None)
+                st.session_state.llm_acc_hist.append(None)
+                st.session_state.llm_f1_hist.append(None)
 
         st.subheader("Prompt-MII Synthesized Instruction")
         st.code(mii_instruction)
-
         st.subheader("Classic ICL Prompt Format")
         st.code(classic_instruction)
 
@@ -198,38 +206,45 @@ if st.button("Run Demo"):
         st.bar_chart(bar_data)
         st.caption(f"Prompt-MII uses {mii_tokens} tokens, Classic ICL {classic_tokens} tokens ({100*(1-mii_tokens/classic_tokens):.1f}% saved).")
 
-        # Accuracy plot for Prompt-MII and OpenAI LLM
-        st.markdown("### Accuracy Over Your Last Runs")
-        fig, ax = plt.subplots()
-        mii_hist = list(st.session_state.mii_acc_hist)
-        ax.plot(range(-len(mii_hist)+1, 1), mii_hist, "o-", label="Prompt-MII (Ensemble)")
-        if any(st.session_state.llm_acc_hist):
+        # Accuracy plot for all techniques
+        st.markdown("### Accuracy History | F1 Score History")
+        fig, axs = plt.subplots(1, 2, figsize=(12,5))
+        x = range(-len(st.session_state.mii_acc_hist)+1, 1)
+        axs[0].plot(x, list(st.session_state.mii_acc_hist), "o-", label="Prompt-MII")
+        axs[0].plot(x, list(st.session_state.classic_acc_hist), "s-", label="Classic")
+        axs[0].plot(x, list(st.session_state.rand_acc_hist), "v-", label="Random")
+        if use_live_llm:
             llm_hist = [x for x in st.session_state.llm_acc_hist if x is not None]
             if llm_hist:
-                ax.plot(range(-len(llm_hist)+1, 1), llm_hist, "s-", color="green", label="Prompt-MII (OpenAI LLM)")
-        ax.set_ylim(-0.05, 1.05)
-        ax.set_yticks([0,1])
-        ax.set_xlabel("Run (most recent right)")
-        ax.set_ylabel("Accuracy")
-        ax.set_title("Model Accuracy History")
-        ax.legend()
+                axs[0].plot(range(-len(llm_hist)+1, 1), llm_hist, "x-", label="OpenAI LLM")
+        axs[0].set_ylabel("Accuracy")
+        axs[0].set_xlabel("Run (most recent right)")
+        axs[0].set_yticks([0,1])
+        axs[0].set_title("Accuracy History")
+        axs[0].legend()
+        # F1 history
+        axs[1].plot(x, list(st.session_state.mii_f1_hist), 'o-', label="Prompt-MII")
+        axs[1].plot(x, list(st.session_state.classic_f1_hist), 's-', label="Classic")
+        axs[1].plot(x, list(st.session_state.rand_f1_hist), 'v-', label="Random")
+        if use_live_llm:
+            llm_f1hist = [x for x in st.session_state.llm_f1_hist if x is not None]
+            if llm_f1hist:
+                axs[1].plot(range(-len(llm_f1hist)+1, 1), llm_f1hist, 'x-', label="OpenAI LLM")
+        axs[1].set_ylabel("F1 Score")
+        axs[1].set_ylim(0,1.05)
+        axs[1].set_xlabel("Run")
+        axs[1].set_title("F1 Score History")
+        axs[1].legend()
         st.pyplot(fig)
 
-st.caption("Test real-world and business scenarios with true metrics, accuracy-boosting, and modern LLM integration. Tune Prompt-MII for top results!")
+st.caption("Test real-world and business scenarios with true accuracy and F1 scores for all prompt methods, and LLM integration!")
 
-# Usage example summary for users:
+# Quick usage example
 st.markdown("""
 ---
-**Quick Example for Testing:**
-
-Subject: `Science`  
-Question: `What is the boiling point of water at sea level in Celsius?`  
-Choices: `0, 50, 100, 212`  
-Correct Answer: `100`
-
-Or try:  
-Subject: `Finance`  
-Question: `Is this transaction potentially fraudulent?`  
-Choices: `Yes, No, Unclear`  
-Correct Answer: `Yes`
+**Test Example:**  
+Subject: Science  
+Question: What is the boiling point of water at sea level in Celsius?  
+Choices: 0, 50, 100, 212  
+Correct Answer: 100  
 """)
