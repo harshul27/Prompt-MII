@@ -35,12 +35,11 @@ def classic_fewshot_answer(question, choices):
 
 # --- App Layout/Instructions ---
 st.set_page_config(layout="wide")
-st.title("🔬 Prompt-MII: Interactive Industry-Grade Prompt Benchmarking Tool")
-st.markdown("""
-✔️ **Upload, fetch, or test datasets with thousands of real-world cases for true evaluation**  
-✔️ **See real-time, professional visualizations and clear summaries**  
-✔️ **Compare Prompt-MII to Classic, Majority, and Random prompting**  
-✔️ **Click 'Show Details' for interpretation, logic, and token usage explanations**  
+st.title(" Prompt-MII: Interactive Industry-Grade Prompt Benchmarking Tool")
+st.markdown("""  
+See real-time, professional visualizations and clear summaries  
+Compare Prompt-MII to Classic, Majority, and Random prompting  
+Click 'Show Details' for interpretation, logic, and token usage explanations  
 ---
 """)
 
@@ -143,3 +142,4 @@ if st.button("Run Large-Scale MMLU Test"):
 - **Random** is pure chance—the lower bound for all AI/automation, used as a sanity control.
 *The plots demonstrate Prompt-MII's potential for higher accuracy at vastly lower cost, universal domain-coverage, and explainable reasoning with less engineering effort.*
 """)
+
