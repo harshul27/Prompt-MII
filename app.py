@@ -32,11 +32,12 @@ def chain_of_thought_prompt(question, choices):
     """Chain-of-Thought: Step-by-step reasoning"""
     return f"Question: {question}\nChoices: {', '.join(choices)}\n\nLet's think step by step to find the correct answer:"
 
-# === LLM API Inference ===
+# === LLM API Inference (FIXED) ===
 
 def llm_inference(prompt, choices, api_key, model="gpt-4o-mini"):
     """Real LLM inference via OpenAI API"""
     try:
+        # Initialize client WITHOUT proxies parameter
         client = OpenAI(api_key=api_key)
         
         full_prompt = f"{prompt}\n\nRespond with ONLY the letter (A, B, C, or D):"
@@ -65,7 +66,7 @@ def llm_inference(prompt, choices, api_key, model="gpt-4o-mini"):
                 return i
                 
     except Exception as e:
-        st.error(f"API Error: {str(e)[:150]}")
+        st.error(f"API Error: {str(e)[:200]}")
         return None
     
     return random.randint(0, len(choices)-1)
@@ -210,49 +211,51 @@ if st.button("▶️ Run Benchmark", type="primary"):
     st.dataframe(metrics_df, use_container_width=True, hide_index=True)
     
     # Key insights
-    col1, col2, col3 = st.columns(3)
-    
-    mii_acc = sum(results["Prompt-MII"]["correct"]) / len(results["Prompt-MII"]["correct"])
-    mii_tokens = sum(results["Prompt-MII"]["tokens"]) / len(results["Prompt-MII"]["tokens"])
-    
-    fewshot_acc = sum(results["Few-Shot"]["correct"]) / len(results["Few-Shot"]["correct"])
-    fewshot_tokens = sum(results["Few-Shot"]["tokens"]) / len(results["Few-Shot"]["tokens"])
-    
-    col1.metric("Prompt-MII Accuracy", f"{mii_acc:.1%}")
-    col2.metric("Token Savings vs Few-Shot", f"{(1 - mii_tokens/fewshot_tokens)*100:.1f}%")
-    col3.metric("Accuracy Difference", f"{(mii_acc - fewshot_acc)*100:+.1f}%")
-    
-    # Visualizations
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    
-    # Accuracy
-    methods = ["Prompt-MII", "Few-Shot", "Zero-Shot", "Chain-of-Thought", "Random"]
-    accuracies = [sum(results[m]["correct"])/len(results[m]["correct"]) for m in methods]
-    colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#808080']
-    
-    ax1.barh(methods, accuracies, color=colors)
-    ax1.set_xlabel('Accuracy', fontweight='bold')
-    ax1.set_title('Accuracy Comparison', fontweight='bold')
-    ax1.set_xlim(0, 1)
-    for i, v in enumerate(accuracies):
-        ax1.text(v + 0.02, i, f'{v:.1%}', va='center', fontweight='bold')
-    
-    # Token usage
-    avg_tokens = [sum(results[m]["tokens"])/len(results[m]["tokens"]) if results[m]["tokens"] else 0 
-                  for m in methods[:-1]]  # Exclude random
-    
-    ax2.barh(methods[:-1], avg_tokens, color=colors[:-1])
-    ax2.set_xlabel('Avg Tokens per Query', fontweight='bold')
-    ax2.set_title('Token Efficiency', fontweight='bold')
-    for i, v in enumerate(avg_tokens):
-        ax2.text(v + 5, i, f'{v:.0f}', va='center', fontweight='bold')
-    
-    plt.tight_layout()
-    st.pyplot(fig)
-    
-    # Interpretation
-    with st.expander("📖 Analysis & Insights"):
-        st.markdown(f"""
+    if results["Prompt-MII"]["correct"] and results["Few-Shot"]["correct"]:
+        col1, col2, col3 = st.columns(3)
+        
+        mii_acc = sum(results["Prompt-MII"]["correct"]) / len(results["Prompt-MII"]["correct"])
+        mii_tokens = sum(results["Prompt-MII"]["tokens"]) / len(results["Prompt-MII"]["tokens"])
+        
+        fewshot_acc = sum(results["Few-Shot"]["correct"]) / len(results["Few-Shot"]["correct"])
+        fewshot_tokens = sum(results["Few-Shot"]["tokens"]) / len(results["Few-Shot"]["tokens"])
+        
+        col1.metric("Prompt-MII Accuracy", f"{mii_acc:.1%}")
+        col2.metric("Token Savings vs Few-Shot", f"{(1 - mii_tokens/fewshot_tokens)*100:.1f}%")
+        col3.metric("Accuracy Difference", f"{(mii_acc - fewshot_acc)*100:+.1f}%")
+        
+        # Visualizations
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        
+        # Accuracy
+        methods = ["Prompt-MII", "Few-Shot", "Zero-Shot", "Chain-of-Thought", "Random"]
+        accuracies = [sum(results[m]["correct"])/len(results[m]["correct"]) for m in methods if results[m]["correct"]]
+        colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#808080']
+        
+        ax1.barh(methods[:len(accuracies)], accuracies, color=colors[:len(accuracies)])
+        ax1.set_xlabel('Accuracy', fontweight='bold')
+        ax1.set_title('Accuracy Comparison', fontweight='bold')
+        ax1.set_xlim(0, 1)
+        for i, v in enumerate(accuracies):
+            ax1.text(v + 0.02, i, f'{v:.1%}', va='center', fontweight='bold')
+        
+        # Token usage
+        token_methods = ["Prompt-MII", "Few-Shot", "Zero-Shot", "Chain-of-Thought"]
+        avg_tokens = [sum(results[m]["tokens"])/len(results[m]["tokens"]) if results[m]["tokens"] else 0 
+                      for m in token_methods]
+        
+        ax2.barh(token_methods, avg_tokens, color=colors[:4])
+        ax2.set_xlabel('Avg Tokens per Query', fontweight='bold')
+        ax2.set_title('Token Efficiency', fontweight='bold')
+        for i, v in enumerate(avg_tokens):
+            ax2.text(v + 5, i, f'{v:.0f}', va='center', fontweight='bold')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        # Interpretation
+        with st.expander("📖 Analysis & Insights"):
+            st.markdown(f"""
 ### Key Findings
 
 **Prompt-MII Performance:**
@@ -270,7 +273,7 @@ if st.button("▶️ Run Benchmark", type="primary"):
 **Business Impact**: Prompt-MII achieves competitive accuracy with {(1 - mii_tokens/fewshot_tokens)*100:.0f}% fewer tokens, directly reducing API costs.
 
 **Model**: {model} | **Dataset**: MMLU/{mmlu_subset} | **Samples**: {len(df)}
-        """)
+            """)
 
 st.markdown("---")
 st.caption("Built by Harshul | Prompt Engineering Research | Based on arXiv:2510.16932")
