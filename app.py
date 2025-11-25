@@ -32,32 +32,15 @@ def chain_of_thought_prompt(question, choices):
     """Reasoning-focused prompting"""
     return f"Question: {question}\nChoices: {', '.join(choices)}\n\nLet's think step by step to find the correct answer:"
 
-# === LLM Inference (FIXED FOR CURRENT API) ===
+# === LLM Inference with Gemini-2.5-Flash ===
 
 def gemini_inference(prompt, choices, api_key):
     """Call Gemini API for real LLM predictions"""
     try:
         genai.configure(api_key=api_key)
         
-        # Try multiple model names for compatibility
-        model_names = [
-            "gemini-1.5-flash",
-            "gemini-1.5-pro", 
-            "models/gemini-1.5-flash",
-            "models/gemini-pro"
-        ]
-        
-        model = None
-        for model_name in model_names:
-            try:
-                model = genai.GenerativeModel(model_name)
-                break
-            except:
-                continue
-        
-        if model is None:
-            st.error("Could not initialize any Gemini model. Check your API key.")
-            return None
+        # Use the specified model
+        model = genai.GenerativeModel("models/gemini-2.5-flash")
         
         full_prompt = f"{prompt}\n\nRespond with ONLY the letter (A, B, C, or D):"
         
@@ -105,24 +88,14 @@ Compare **Prompt-MII** (meta-learned compact instructions) against industry-stan
 - **Zero-Shot**: Minimal instruction
 - **Chain-of-Thought**: Step-by-step reasoning
 
-📊 **Evaluate**: Accuracy, F1 Score, and Token Efficiency on MMLU benchmark
+📊 **Evaluate**: Accuracy, F1 Score, and Token Efficiency on MMLU benchmark  
+🤖 **Using**: Gemini 2.5 Flash (Latest Model)
 """)
 
 # Sidebar
 st.sidebar.header("⚙️ Configuration")
 api_key = st.sidebar.text_input("Gemini API Key", type="password", 
                                  help="Get free key: https://aistudio.google.com/app/apikey")
-
-# Add model checker
-if api_key and st.sidebar.button("🔍 Check Available Models"):
-    try:
-        genai.configure(api_key=api_key)
-        st.sidebar.write("**Available models:**")
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                st.sidebar.success(f"✓ {m.name}")
-    except Exception as e:
-        st.sidebar.error(f"Error: {e}")
 
 sample_size = st.sidebar.slider("Sample Size", 20, 100, 50, 10)
 mmlu_domain = st.sidebar.selectbox("MMLU Domain", 
@@ -288,8 +261,13 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
 **Business Impact:**  
 Token savings directly translate to lower API costs while maintaining competitive performance.
 
+**Technical Details:**
+- Model: Gemini 2.5 Flash (Latest)
+- Dataset: MMLU ({mmlu_domain})
+- Evaluation: {len(results["Prompt-MII"]["predictions"])} samples
+
 **Reference**: [Prompt-MII: Meta-Instruction Induction](https://arxiv.org/abs/2510.16932)
             """)
 
 st.markdown("---")
-st.caption("Built by Harshul | Prompt Engineering Research Demo | Based on arXiv:2510.16932")
+st.caption("Built by Harshul | Prompt Engineering Research Demo | Gemini 2.5 Flash | Based on arXiv:2510.16932")
