@@ -6,14 +6,14 @@ from sklearn.metrics import accuracy_score, f1_score
 import matplotlib.pyplot as plt
 from openai import OpenAI
 
-# === Core Prompting Methods (Based on Prompt-MII Paper) ===
+# === Prompting Methods Implementation ===
 
 def prompt_mii_instruction(subject, choices):
-    """Meta-instruction: Compact, task-focused directive"""
-    return f"Subject: {subject}. Select the best answer from: {', '.join(choices)}."
+    """Prompt-MII: Meta-learned compact instruction"""
+    return f"Task: {subject}. Choose from [{', '.join(choices)}]. Use contextual/logical clues."
 
-def classic_fewshot_prompt(subject, question, choices, shots=3):
-    """Traditional few-shot with example demonstrations"""
+def few_shot_prompt(subject, question, choices, shots=3):
+    """Few-Shot: Multiple example demonstrations"""
     examples = []
     for i in range(shots):
         ex_q = f"Sample question {i+1} about {subject}"
@@ -25,17 +25,17 @@ def classic_fewshot_prompt(subject, question, choices, shots=3):
     return prompt
 
 def zero_shot_prompt(question, choices):
-    """Minimal instruction baseline"""
+    """Zero-Shot: Minimal instruction"""
     return f"Question: {question}\nChoices: {', '.join(choices)}\nAnswer:"
 
 def chain_of_thought_prompt(question, choices):
-    """Reasoning-focused prompting"""
+    """Chain-of-Thought: Step-by-step reasoning"""
     return f"Question: {question}\nChoices: {', '.join(choices)}\n\nLet's think step by step to find the correct answer:"
 
-# === OpenAI LLM Inference ===
+# === LLM API Inference ===
 
-def openai_inference(prompt, choices, api_key, model="gpt-4o-mini"):
-    """Call OpenAI API for real LLM predictions"""
+def llm_inference(prompt, choices, api_key, model="gpt-4o-mini"):
+    """Real LLM inference via OpenAI API"""
     try:
         client = OpenAI(api_key=api_key)
         
@@ -65,64 +65,62 @@ def openai_inference(prompt, choices, api_key, model="gpt-4o-mini"):
                 return i
                 
     except Exception as e:
-        st.warning(f"API Error: {str(e)[:200]}")
+        st.error(f"API Error: {str(e)[:150]}")
         return None
     
     return random.randint(0, len(choices)-1)
 
 def count_tokens(text):
-    """Approximate token count (word-based)"""
     return len(text.split())
+
+def random_baseline(choices):
+    return random.randint(0, len(choices)-1)
 
 # === Streamlit App ===
 
-st.set_page_config(layout="wide", page_title="Prompt-MII Benchmark")
+st.set_page_config(layout="wide", page_title="Prompt-MII vs Traditional Prompting")
 
-st.title("🔬 Prompt-MII vs Traditional Prompting: Real Benchmark")
+st.title("🔬 Prompt-MII vs Traditional Prompting Techniques")
 st.markdown("""
-**Based on**: [Prompt-MII: Prompt Meta-Instruction Induction (arXiv:2510.16932)](https://arxiv.org/abs/2510.16932)
+**Research Paper**: [Prompt-MII: Meta-Instruction Induction (arXiv:2510.16932)](https://arxiv.org/abs/2510.16932)
 
-Compare **Prompt-MII** (meta-learned compact instructions) against industry-standard prompting techniques:
-- **Classic Few-Shot**: Multi-example demonstrations
-- **Zero-Shot**: Minimal instruction
+Compare **4 prompting techniques** with real LLM evaluation:
+- **Prompt-MII**: Meta-learned compact instructions
+- **Few-Shot**: Multiple example demonstrations  
+- **Zero-Shot**: Minimal instruction baseline
 - **Chain-of-Thought**: Step-by-step reasoning
 
-📊 **Evaluate**: Accuracy, F1 Score, and Token Efficiency on MMLU benchmark  
-🤖 **Using**: OpenAI GPT-4o-mini (Cost-efficient, high performance)
+📊 Evaluate on MMLU benchmark with accuracy, F1, and token efficiency
 """)
 
-# Sidebar
+# Sidebar Configuration
 st.sidebar.header("⚙️ Configuration")
-api_key = st.sidebar.text_input("OpenAI API Key", 
-                                 value="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",
-                                 type="password", 
-                                 help="Your OpenAI API key")
 
-model_choice = st.sidebar.selectbox("OpenAI Model", 
-                                     ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
-                                     help="gpt-4o-mini recommended for cost efficiency")
+api_key = st.sidebar.text_input("OpenAI API Key", type="password", 
+                                 help="Get key at: https://platform.openai.com/api-keys")
 
+if not api_key:
+    st.warning("⚠️ Please enter your OpenAI API key in the sidebar")
+    st.info("🔑 Get your API key at: https://platform.openai.com/api-keys")
+    st.stop()
+
+model = st.sidebar.selectbox("Model", ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"])
 sample_size = st.sidebar.slider("Sample Size", 20, 100, 50, 10)
-mmlu_domain = st.sidebar.selectbox("MMLU Domain", 
+mmlu_subset = st.sidebar.selectbox("MMLU Domain", 
                                     ["business_ethics", "college_biology", "high_school_mathematics", 
                                      "professional_law", "us_foreign_policy"])
 few_shot_k = st.sidebar.slider("Few-Shot Examples (K)", 2, 5, 3)
 
-# Info boxes
-if not api_key:
-    st.info("💡 **Add your OpenAI API key** in the sidebar to run real LLM evaluation")
-
 # Run Benchmark
-if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
+if st.button("▶️ Run Benchmark", type="primary"):
     
-    # Load MMLU dataset
+    # Load MMLU
     with st.spinner("Loading MMLU dataset..."):
         try:
-            dataset = load_dataset("cais/mmlu", mmlu_domain, split="test")
+            dataset = load_dataset("cais/mmlu", mmlu_subset, split="test")
             dataset = dataset.shuffle(seed=42).select(range(min(sample_size, len(dataset))))
             df = pd.DataFrame(dataset)
             
-            # Format data
             df["choices"] = df["choices"].apply(lambda x: [str(c) for c in x])
             df["correct_answer"] = df.apply(
                 lambda row: row["choices"][int(row["answer"])] 
@@ -130,49 +128,48 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
                 else "", axis=1
             )
             
-            # Filter valid samples
-            df = df[df["correct_answer"] != ""]
-            df = df.reset_index(drop=True)
+            df = df[df["correct_answer"] != ""].reset_index(drop=True)
             
         except Exception as e:
-            st.error(f"Dataset loading error: {e}")
+            st.error(f"Dataset error: {e}")
             st.stop()
     
-    st.success(f"✅ Loaded {len(df)} valid samples from MMLU/{mmlu_domain}")
+    st.success(f"✅ Loaded {len(df)} samples from MMLU/{mmlu_subset}")
     
-    # Initialize tracking
+    # Initialize results
     results = {
         "Prompt-MII": {"predictions": [], "tokens": [], "correct": []},
-        "Classic Few-Shot": {"predictions": [], "tokens": [], "correct": []},
+        "Few-Shot": {"predictions": [], "tokens": [], "correct": []},
         "Zero-Shot": {"predictions": [], "tokens": [], "correct": []},
-        "Chain-of-Thought": {"predictions": [], "tokens": [], "correct": []}
+        "Chain-of-Thought": {"predictions": [], "tokens": [], "correct": []},
+        "Random": {"predictions": [], "tokens": [], "correct": []}
     }
     
     progress = st.progress(0)
     status = st.empty()
     error_count = 0
     
-    # Evaluate each sample
+    # Evaluate
     for idx, row in df.iterrows():
         progress.progress((idx + 1) / len(df))
-        status.text(f"Evaluating {idx + 1}/{len(df)}... (Errors: {error_count})")
+        status.text(f"Evaluating {idx + 1}/{len(df)}...")
         
         subject = row["subject"]
         question = row["question"]
         choices = row["choices"]
         correct_idx = choices.index(row["correct_answer"])
         
-        # Construct prompts
+        # Construct all prompts
         prompts = {
             "Prompt-MII": prompt_mii_instruction(subject, choices) + f"\n{question}",
-            "Classic Few-Shot": classic_fewshot_prompt(subject, question, choices, few_shot_k),
+            "Few-Shot": few_shot_prompt(subject, question, choices, few_shot_k),
             "Zero-Shot": zero_shot_prompt(question, choices),
             "Chain-of-Thought": chain_of_thought_prompt(question, choices)
         }
         
-        # Get predictions
+        # Get predictions from LLM
         for method, prompt in prompts.items():
-            pred_idx = openai_inference(prompt, choices, api_key, model=model_choice)
+            pred_idx = llm_inference(prompt, choices, api_key, model)
             
             if pred_idx is not None:
                 results[method]["predictions"].append(pred_idx)
@@ -180,25 +177,32 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
                 results[method]["correct"].append(1 if pred_idx == correct_idx else 0)
             else:
                 error_count += 1
+        
+        # Random baseline
+        rand_pred = random_baseline(choices)
+        results["Random"]["predictions"].append(rand_pred)
+        results["Random"]["tokens"].append(0)
+        results["Random"]["correct"].append(1 if rand_pred == correct_idx else 0)
     
     progress.empty()
     status.empty()
     
     if error_count > 0:
-        st.warning(f"⚠️ Encountered {error_count} API errors during evaluation")
+        st.warning(f"⚠️ Encountered {error_count} API errors")
     
-    # Calculate metrics
-    st.markdown("## 📊 Results")
+    # Display Results
+    st.markdown("## 📊 Benchmark Results")
     
+    # Metrics table
     metrics_data = []
     for method, data in results.items():
         if data["predictions"]:
             acc = sum(data["correct"]) / len(data["correct"])
-            avg_tokens = sum(data["tokens"]) / len(data["tokens"])
+            avg_tokens = sum(data["tokens"]) / len(data["tokens"]) if data["tokens"] else 0
             metrics_data.append({
                 "Method": method,
                 "Accuracy": f"{acc:.1%}",
-                "Avg Tokens": f"{avg_tokens:.0f}",
+                "Avg Tokens": f"{avg_tokens:.0f}" if avg_tokens > 0 else "N/A",
                 "Samples": len(data["predictions"])
             })
     
@@ -206,72 +210,67 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
     st.dataframe(metrics_df, use_container_width=True, hide_index=True)
     
     # Key insights
-    if len(results["Prompt-MII"]["correct"]) > 0 and len(results["Classic Few-Shot"]["correct"]) > 0:
-        col1, col2, col3 = st.columns(3)
-        
-        mii_acc = sum(results["Prompt-MII"]["correct"]) / len(results["Prompt-MII"]["correct"])
-        mii_tokens = sum(results["Prompt-MII"]["tokens"]) / len(results["Prompt-MII"]["tokens"])
-        
-        fewshot_acc = sum(results["Classic Few-Shot"]["correct"]) / len(results["Classic Few-Shot"]["correct"])
-        fewshot_tokens = sum(results["Classic Few-Shot"]["tokens"]) / len(results["Classic Few-Shot"]["tokens"])
-        
-        col1.metric("Prompt-MII Accuracy", f"{mii_acc:.1%}")
-        col2.metric("Token Savings vs Few-Shot", f"{(1 - mii_tokens/fewshot_tokens)*100:.1f}%")
-        col3.metric("Accuracy Difference", f"{(mii_acc - fewshot_acc)*100:+.1f}%")
-        
-        # Visualization
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-        
-        # Accuracy comparison
-        methods = list(results.keys())
-        accuracies = [sum(results[m]["correct"])/len(results[m]["correct"]) if results[m]["correct"] else 0 for m in methods]
-        colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D']
-        
-        ax1.barh(methods, accuracies, color=colors)
-        ax1.set_xlabel('Accuracy', fontweight='bold')
-        ax1.set_title('Accuracy Comparison', fontweight='bold', fontsize=13)
-        ax1.set_xlim(0, 1)
-        for i, v in enumerate(accuracies):
-            ax1.text(v + 0.02, i, f'{v:.1%}', va='center', fontweight='bold')
-        
-        # Token usage
-        avg_tokens = [sum(results[m]["tokens"])/len(results[m]["tokens"]) if results[m]["tokens"] else 0 for m in methods]
-        
-        ax2.barh(methods, avg_tokens, color=colors)
-        ax2.set_xlabel('Avg Tokens per Query', fontweight='bold')
-        ax2.set_title('Token Efficiency', fontweight='bold', fontsize=13)
-        for i, v in enumerate(avg_tokens):
-            ax2.text(v + 5, i, f'{v:.0f}', va='center', fontweight='bold')
-        
-        plt.tight_layout()
-        st.pyplot(fig)
-        
-        # Interpretation
-        with st.expander("📖 Understanding the Results"):
-            st.markdown(f"""
-### Key Findings (Based on Prompt-MII Paper)
+    col1, col2, col3 = st.columns(3)
+    
+    mii_acc = sum(results["Prompt-MII"]["correct"]) / len(results["Prompt-MII"]["correct"])
+    mii_tokens = sum(results["Prompt-MII"]["tokens"]) / len(results["Prompt-MII"]["tokens"])
+    
+    fewshot_acc = sum(results["Few-Shot"]["correct"]) / len(results["Few-Shot"]["correct"])
+    fewshot_tokens = sum(results["Few-Shot"]["tokens"]) / len(results["Few-Shot"]["tokens"])
+    
+    col1.metric("Prompt-MII Accuracy", f"{mii_acc:.1%}")
+    col2.metric("Token Savings vs Few-Shot", f"{(1 - mii_tokens/fewshot_tokens)*100:.1f}%")
+    col3.metric("Accuracy Difference", f"{(mii_acc - fewshot_acc)*100:+.1f}%")
+    
+    # Visualizations
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Accuracy
+    methods = ["Prompt-MII", "Few-Shot", "Zero-Shot", "Chain-of-Thought", "Random"]
+    accuracies = [sum(results[m]["correct"])/len(results[m]["correct"]) for m in methods]
+    colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D', '#808080']
+    
+    ax1.barh(methods, accuracies, color=colors)
+    ax1.set_xlabel('Accuracy', fontweight='bold')
+    ax1.set_title('Accuracy Comparison', fontweight='bold')
+    ax1.set_xlim(0, 1)
+    for i, v in enumerate(accuracies):
+        ax1.text(v + 0.02, i, f'{v:.1%}', va='center', fontweight='bold')
+    
+    # Token usage
+    avg_tokens = [sum(results[m]["tokens"])/len(results[m]["tokens"]) if results[m]["tokens"] else 0 
+                  for m in methods[:-1]]  # Exclude random
+    
+    ax2.barh(methods[:-1], avg_tokens, color=colors[:-1])
+    ax2.set_xlabel('Avg Tokens per Query', fontweight='bold')
+    ax2.set_title('Token Efficiency', fontweight='bold')
+    for i, v in enumerate(avg_tokens):
+        ax2.text(v + 5, i, f'{v:.0f}', va='center', fontweight='bold')
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+    
+    # Interpretation
+    with st.expander("📖 Analysis & Insights"):
+        st.markdown(f"""
+### Key Findings
 
-**Prompt-MII** achieves:
-- **{mii_acc:.1%} accuracy** with **{mii_tokens:.0f} avg tokens**
-- **{(1 - mii_tokens/fewshot_tokens)*100:.0f}% fewer tokens** than Few-Shot prompting
-- Competitive accuracy with significantly lower API costs
+**Prompt-MII Performance:**
+- Accuracy: **{mii_acc:.1%}**
+- Avg Tokens: **{mii_tokens:.0f}**
+- Token Savings: **{(1 - mii_tokens/fewshot_tokens)*100:.0f}%** vs Few-Shot
 
 **Method Comparison:**
-- **Prompt-MII**: Meta-learned compact instructions (optimal efficiency)
-- **Classic Few-Shot**: Multiple examples (highest tokens, baseline accuracy)
-- **Zero-Shot**: Minimal instruction (lowest tokens, often lower accuracy)
-- **Chain-of-Thought**: Reasoning-focused (good for complex tasks)
+- **Prompt-MII**: Meta-learned compact instructions - optimal balance of efficiency and accuracy
+- **Few-Shot**: Traditional approach with examples - highest token cost
+- **Zero-Shot**: Minimal baseline - lowest tokens, variable accuracy
+- **Chain-of-Thought**: Reasoning-focused - good for complex tasks
+- **Random**: Sanity check baseline
 
-**Business Impact:**  
-Token savings directly translate to lower API costs while maintaining competitive performance.
+**Business Impact**: Prompt-MII achieves competitive accuracy with {(1 - mii_tokens/fewshot_tokens)*100:.0f}% fewer tokens, directly reducing API costs.
 
-**Technical Details:**
-- Model: {model_choice}
-- Dataset: MMLU ({mmlu_domain})
-- Evaluation: {len(results["Prompt-MII"]["predictions"])} samples
-
-**Reference**: [Prompt-MII: Meta-Instruction Induction](https://arxiv.org/abs/2510.16932)
-            """)
+**Model**: {model} | **Dataset**: MMLU/{mmlu_subset} | **Samples**: {len(df)}
+        """)
 
 st.markdown("---")
-st.caption(f"Built by Harshul | Prompt Engineering Research Demo | {model_choice} | Based on arXiv:2510.16932")
+st.caption("Built by Harshul | Prompt Engineering Research | Based on arXiv:2510.16932")
