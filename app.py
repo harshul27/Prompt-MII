@@ -6,285 +6,242 @@ from sklearn.metrics import accuracy_score, f1_score
 import matplotlib.pyplot as plt
 import google.generativeai as genai
 
-# === LLM Integration ===
-def gemini_inference(prompt, choices, api_key, model="gemini-1.5-flash"):
-    """Real LLM inference via Google Gemini API"""
-    if not api_key:
-        return None
+# === Core Prompting Methods (Based on Prompt-MII Paper) ===
+
+def prompt_mii_instruction(subject, choices):
+    """Meta-instruction: Compact, task-focused directive"""
+    return f"Subject: {subject}. Select the best answer from: {', '.join(choices)}."
+
+def classic_fewshot_prompt(subject, question, choices, shots=3):
+    """Traditional few-shot with example demonstrations"""
+    examples = []
+    for i in range(shots):
+        ex_q = f"Sample question {i+1} about {subject}"
+        ex_ans = random.choice(choices)
+        examples.append(f"Q: {ex_q}\nChoices: {', '.join(choices)}\nA: {ex_ans}")
     
+    prompt = "\n\n".join(examples)
+    prompt += f"\n\nQ: {question}\nChoices: {', '.join(choices)}\nA:"
+    return prompt
+
+def zero_shot_prompt(question, choices):
+    """Minimal instruction baseline"""
+    return f"Question: {question}\nChoices: {', '.join(choices)}\nAnswer:"
+
+def chain_of_thought_prompt(question, choices):
+    """Reasoning-focused prompting"""
+    return f"Question: {question}\nChoices: {', '.join(choices)}\n\nLet's think step by step to find the correct answer:"
+
+# === LLM Inference ===
+
+def gemini_inference(prompt, choices, api_key):
+    """Call Gemini API for real LLM predictions"""
     try:
         genai.configure(api_key=api_key)
-        model_instance = genai.GenerativeModel(model)
+        model = genai.GenerativeModel("gemini-1.5-flash")
         
-        # Format as multiple choice
-        formatted_prompt = f"{prompt}\n\nChoices:\n"
-        for i, c in enumerate(choices):
-            formatted_prompt += f"{chr(65+i)}. {c}\n"
-        formatted_prompt += "\nAnswer with ONLY the letter (A, B, C, or D):"
+        full_prompt = f"{prompt}\n\nRespond with ONLY the letter (A, B, C, or D):"
+        response = model.generate_content(full_prompt)
+        answer = response.text.strip().upper()
         
-        response = model_instance.generate_content(formatted_prompt)
-        answer_text = response.text.strip().upper()
-        
-        # Parse response (A/B/C/D -> index)
-        if answer_text and answer_text[0] in 'ABCD':
-            idx = ord(answer_text[0]) - 65
+        # Parse letter response
+        if answer and answer[0] in 'ABCD':
+            idx = ord(answer[0]) - 65
             if idx < len(choices):
                 return idx
         
-        # Fallback: check if choice text appears in response
+        # Fallback: match choice text
         for i, choice in enumerate(choices):
-            if choice.lower() in answer_text.lower():
+            if choice.lower() in answer.lower():
                 return i
                 
     except Exception as e:
-        st.warning(f"API Error: {str(e)[:100]}")
+        st.error(f"API Error: {str(e)[:150]}")
         return None
     
     return random.randint(0, len(choices)-1)
 
-# === Enhanced Prompt-MII Heuristic (for non-API mode) ===
-def classify_prompt_mii_enhanced(question, choices, n_votes=5):
-    """Improved heuristic with semantic scoring"""
-    votes = []
-    question_lower = question.lower()
-    question_words = set(question_lower.split())
-    
-    for _ in range(n_votes):
-        scores = []
-        for c in choices:
-            choice_lower = c.lower()
-            choice_words = set(choice_lower.split())
-            
-            # Multi-factor scoring
-            overlap = len(question_words & choice_words)
-            substring = 2 if choice_lower in question_lower else 0
-            length_penalty = 1 / (1 + abs(len(choice_words) - 3))
-            
-            total_score = overlap * 2 + substring * 3 + length_penalty + random.random() * 0.5
-            scores.append(total_score)
-        
-        if max(scores) > 0:
-            votes.append(scores.index(max(scores)))
-        else:
-            votes.append(random.randint(0, len(choices)-1))
-    
-    return max(set(votes), key=votes.count)
-
-# === Prompt Construction ===
-def prompt_mii_instruction(subject, choices):
-    return f"Task: {subject}. Choose from [{', '.join(choices)}]. Use contextual/logical clues."
-
-def classic_fewshot_prompt(subject, question, choices, shots=4):
-    fewshot_examples = [
-        f"Q{i+1}: Example question about {subject}? Choices: {', '.join(choices)}. A: {random.choice(choices)}"
-        for i in range(shots)
-    ]
-    fewshot_block = "\n".join(fewshot_examples)
-    return f"{fewshot_block}\nQ: {question}\nChoices: {', '.join(choices)}"
-
-def zero_shot_prompt(subject, question, choices):
-    return f"Subject: {subject}\nQ: {question}\nChoices: {', '.join(choices)}"
-
-def chain_of_thought_prompt(subject, question, choices):
-    return f"Subject: {subject}\nQ: {question}\nChoices: {', '.join(choices)}\nLet's think step by step."
-
-def random_baseline(choices):
-    return random.randint(0, len(choices)-1)
-
-def majority_baseline(choices, batch_answers):
-    if not batch_answers:
-        return random_baseline(choices)
-    maj_ans = max(set(batch_answers), key=batch_answers.count)
-    return choices.index(maj_ans) if maj_ans in choices else random_baseline(choices)
-
 def count_tokens(text):
+    """Approximate token count (word-based)"""
     return len(text.split())
 
-# === Streamlit UI ===
-st.set_page_config(layout="wide")
-st.title("🧪 Prompt Engineering Benchmark: Real LLM Comparison")
-st.markdown("""
-**Demonstrate Prompt-MII's value**: Competitive accuracy with significant token savings vs traditional techniques.
+# === Streamlit App ===
 
-🔑 **Add your Google Gemini API key** (free tier: 15 requests/min) to see real LLM results!  
-Get yours at: https://makersuite.google.com/app/apikey
----
+st.set_page_config(layout="wide", page_title="Prompt-MII Benchmark")
+
+st.title("🔬 Prompt-MII vs Traditional Prompting: Real Benchmark")
+st.markdown("""
+**Based on**: [Prompt-MII: Prompt Meta-Instruction Induction (arXiv:2510.16932)](https://arxiv.org/abs/2510.16932)
+
+Compare **Prompt-MII** (meta-learned compact instructions) against industry-standard prompting techniques:
+- **Classic Few-Shot**: Multi-example demonstrations
+- **Zero-Shot**: Minimal instruction
+- **Chain-of-Thought**: Step-by-step reasoning
+
+📊 **Evaluate**: Accuracy, F1 Score, and Token Efficiency on MMLU benchmark
 """)
 
-# Sidebar Controls
-api_key = st.sidebar.text_input("Google Gemini API Key", type="password", help="Required for real LLM inference")
-use_llm = st.sidebar.checkbox("Use Real LLM (Gemini)", value=bool(api_key))
-n_votes = st.sidebar.slider("Prompt-MII Voting Ensemble", min_value=1, max_value=15, value=5, step=2)
-sample_size = st.sidebar.number_input("Number of Samples", min_value=20, max_value=200, value=50, step=10)
-mmlu_subset = st.sidebar.selectbox("MMLU Domain", ["business_ethics", "college_biology", "us_foreign_policy", "all"])
-fewshot_shots = st.sidebar.slider("Classic Few-Shot Examples", min_value=2, max_value=8, value=4, step=1)
+# Sidebar
+st.sidebar.header("⚙️ Configuration")
+api_key = st.sidebar.text_input("Gemini API Key", type="password", 
+                                 help="Get free key: https://makersuite.google.com/app/apikey")
+sample_size = st.sidebar.slider("Sample Size", 20, 100, 50, 10)
+mmlu_domain = st.sidebar.selectbox("MMLU Domain", 
+                                    ["business_ethics", "college_biology", "high_school_mathematics", 
+                                     "professional_law", "us_foreign_policy"])
+few_shot_k = st.sidebar.slider("Few-Shot Examples (K)", 2, 5, 3)
 
+# Info boxes
 if not api_key:
-    st.warning("⚠️ **Demo Mode**: Add your Gemini API key above for real LLM results. Currently using heuristic simulation.")
+    st.info("💡 **Add your Gemini API key** in the sidebar to run real LLM evaluation")
 
-if st.button("🚀 Run Prompt Engineering Benchmark"):
+# Run Benchmark
+if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
+    
+    # Load MMLU dataset
     with st.spinner("Loading MMLU dataset..."):
-        mmlu = load_dataset("cais/mmlu", mmlu_subset, split="test")
-        mmlu = mmlu.shuffle(seed=123).select(range(sample_size))
-        mmlu_df = pd.DataFrame(mmlu)
-        mmlu_df["choices"] = mmlu_df["choices"].apply(lambda x: [str(y) for y in x])
-        mmlu_df["answer_str"] = mmlu_df.apply(
-            lambda row: 
-                row["choices"][int(row["answer"])] if (str(row["answer"]).isdigit() and int(row["answer"]) < len(row["choices"])) 
-                else row.get("answer", ""), axis=1)
-
-    # Data validation
-    invalid_idxs = []
-    batch_answers = []
-    for idx, row in mmlu_df.iterrows():
-        ans = row["answer_str"]
-        ch = row["choices"]
-        if ans not in ch:
-            invalid_idxs.append(idx)
-        else:
-            batch_answers.append(ans)
-    mmlu_df_valid = mmlu_df.drop(index=invalid_idxs)
+        try:
+            dataset = load_dataset("cais/mmlu", mmlu_domain, split="test")
+            dataset = dataset.shuffle(seed=42).select(range(sample_size))
+            df = pd.DataFrame(dataset)
+            
+            # Format data
+            df["choices"] = df["choices"].apply(lambda x: [str(c) for c in x])
+            df["correct_answer"] = df.apply(
+                lambda row: row["choices"][int(row["answer"])] 
+                if str(row["answer"]).isdigit() and int(row["answer"]) < len(row["choices"])
+                else "", axis=1
+            )
+            
+            # Filter valid samples
+            df = df[df["correct_answer"].apply(lambda x: x in df.loc[df.index[0], "choices"] if len(df) > 0 else False)]
+            
+        except Exception as e:
+            st.error(f"Dataset loading error: {e}")
+            st.stop()
     
-    if invalid_idxs:
-        st.info(f"Excluded {len(invalid_idxs)} invalid samples. Evaluating {len(mmlu_df_valid)} samples.")
-
-    # Initialize results
-    results = []
-    y_true = []
-    y_mii, y_classic, y_zero, y_cot, y_maj, y_rand = [], [], [], [], [], []
+    st.success(f"✅ Loaded {len(df)} valid samples from MMLU/{mmlu_domain}")
     
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    for i, (idx, row) in enumerate(mmlu_df_valid.iterrows()):
-        progress_bar.progress((i + 1) / len(mmlu_df_valid))
-        status_text.text(f"Processing sample {i+1}/{len(mmlu_df_valid)}...")
+    # Initialize tracking
+    results = {
+        "Prompt-MII": {"predictions": [], "tokens": [], "correct": []},
+        "Classic Few-Shot": {"predictions": [], "tokens": [], "correct": []},
+        "Zero-Shot": {"predictions": [], "tokens": [], "correct": []},
+        "Chain-of-Thought": {"predictions": [], "tokens": [], "correct": []}
+    }
+    
+    progress = st.progress(0)
+    status = st.empty()
+    
+    # Evaluate each sample
+    for idx, row in df.iterrows():
+        progress.progress((idx + 1) / len(df))
+        status.text(f"Evaluating {idx + 1}/{len(df)}...")
         
         subject = row["subject"]
         question = row["question"]
         choices = row["choices"]
-        answer = row["answer_str"]
-        correct_idx = choices.index(answer)
-        y_true.append(correct_idx)
-
-        # Prompt Construction
-        mii_inst = prompt_mii_instruction(subject, choices)
-        mii_full_prompt = f"{mii_inst}\nQ: {question}\nChoices: {', '.join(choices)}"
-        classic_prompt = classic_fewshot_prompt(subject, question, choices, shots=fewshot_shots)
-        zero_prompt = zero_shot_prompt(subject, question, choices)
-        cot_prompt = chain_of_thought_prompt(subject, question, choices)
-
-        # Predictions
-        if use_llm and api_key:
-            mii_pred = gemini_inference(mii_full_prompt, choices, api_key)
-            classic_pred = gemini_inference(classic_prompt, choices, api_key)
-            zero_pred = gemini_inference(zero_prompt, choices, api_key)
-            cot_pred = gemini_inference(cot_prompt, choices, api_key)
-            inference_mode = "Gemini-1.5"
-        else:
-            mii_pred = classify_prompt_mii_enhanced(question, choices, n_votes)
-            classic_pred = random_baseline(choices)
-            zero_pred = random_baseline(choices)
-            cot_pred = random_baseline(choices)
-            inference_mode = "Simulated"
+        correct_idx = choices.index(row["correct_answer"])
         
-        maj_pred = majority_baseline(choices, batch_answers)
-        rand_pred = random_baseline(choices)
-
-        y_mii.append(mii_pred)
-        y_classic.append(classic_pred)
-        y_zero.append(zero_pred)
-        y_cot.append(cot_pred)
-        y_maj.append(maj_pred)
-        y_rand.append(rand_pred)
-
-        results.append({
-            "idx": idx, "subject": subject, "question": question[:60]+"...", 
-            "choices": "|".join(choices), "answer": answer,
-            "Prompt-MII": choices[mii_pred], "Classic-FewShot": choices[classic_pred], 
-            "Zero-Shot": choices[zero_pred], "Chain-of-Thought": choices[cot_pred], 
-            "Majority": choices[maj_pred], "Random": choices[rand_pred],
-            "mii_tokens": count_tokens(mii_full_prompt),
-            "classic_tokens": count_tokens(classic_prompt),
-            "zero_tokens": count_tokens(zero_prompt),
-            "cot_tokens": count_tokens(cot_prompt)
-        })
-
-    progress_bar.empty()
-    status_text.empty()
-
-    # Metrics calculation
-    methods = {
-        "Prompt-MII": (y_mii, "mii_tokens"),
-        "Classic-FewShot": (y_classic, "classic_tokens"),
-        "Zero-Shot": (y_zero, "zero_tokens"),
-        "Chain-of-Thought": (y_cot, "cot_tokens"),
-        "Majority": (y_maj, None),
-        "Random": (y_rand, None)
-    }
+        # Construct prompts
+        prompts = {
+            "Prompt-MII": prompt_mii_instruction(subject, choices) + f"\n{question}",
+            "Classic Few-Shot": classic_fewshot_prompt(subject, question, choices, few_shot_k),
+            "Zero-Shot": zero_shot_prompt(question, choices),
+            "Chain-of-Thought": chain_of_thought_prompt(question, choices)
+        }
+        
+        # Get predictions
+        for method, prompt in prompts.items():
+            pred_idx = gemini_inference(prompt, choices, api_key)
+            
+            if pred_idx is not None:
+                results[method]["predictions"].append(pred_idx)
+                results[method]["tokens"].append(count_tokens(prompt))
+                results[method]["correct"].append(1 if pred_idx == correct_idx else 0)
     
-    macro_acc = {name: accuracy_score(y_true, preds) for name, (preds, _) in methods.items()}
-    macro_f1 = {name: f1_score(y_true, preds, average='macro') for name, (preds, _) in methods.items()}
-    avg_tokens = {name: (sum([r[tok_col] for r in results]) / len(results) if tok_col else None) 
-                  for name, (_, tok_col) in methods.items()}
-
-    # Display Results
-    st.success(f"✅ Benchmark complete! Inference mode: **{inference_mode}**")
+    progress.empty()
+    status.empty()
     
-    st.markdown("### 📊 Benchmark Results Summary")
+    # Calculate metrics
+    st.markdown("## 📊 Results")
     
-    # Key Insights
+    metrics_data = []
+    for method, data in results.items():
+        if data["predictions"]:
+            acc = sum(data["correct"]) / len(data["correct"])
+            avg_tokens = sum(data["tokens"]) / len(data["tokens"])
+            metrics_data.append({
+                "Method": method,
+                "Accuracy": f"{acc:.1%}",
+                "Avg Tokens": f"{avg_tokens:.0f}",
+                "Total Tokens": sum(data["tokens"])
+            })
+    
+    metrics_df = pd.DataFrame(metrics_data)
+    st.dataframe(metrics_df, use_container_width=True, hide_index=True)
+    
+    # Key insights
     col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Prompt-MII Accuracy", f"{macro_acc['Prompt-MII']:.1%}")
-        st.metric("Prompt-MII Avg Tokens", f"{avg_tokens['Prompt-MII']:.0f}")
-    with col2:
-        st.metric("Classic Few-Shot Accuracy", f"{macro_acc['Classic-FewShot']:.1%}")
-        st.metric("Classic Avg Tokens", f"{avg_tokens['Classic-FewShot']:.0f}")
-    with col3:
-        token_savings = (1 - avg_tokens['Prompt-MII']/avg_tokens['Classic-FewShot']) * 100
-        st.metric("🎯 Token Savings", f"{token_savings:.1f}%", 
-                  help="Prompt-MII uses fewer tokens than Classic Few-Shot")
-        acc_diff = (macro_acc['Prompt-MII'] - macro_acc['Classic-FewShot']) * 100
-        st.metric("Accuracy vs Classic", f"{acc_diff:+.1f}%")
+    
+    mii_acc = sum(results["Prompt-MII"]["correct"]) / len(results["Prompt-MII"]["correct"])
+    mii_tokens = sum(results["Prompt-MII"]["tokens"]) / len(results["Prompt-MII"]["tokens"])
+    
+    fewshot_acc = sum(results["Classic Few-Shot"]["correct"]) / len(results["Classic Few-Shot"]["correct"])
+    fewshot_tokens = sum(results["Classic Few-Shot"]["tokens"]) / len(results["Classic Few-Shot"]["tokens"])
+    
+    col1.metric("Prompt-MII Accuracy", f"{mii_acc:.1%}")
+    col2.metric("Token Savings vs Few-Shot", f"{(1 - mii_tokens/fewshot_tokens)*100:.1f}%")
+    col3.metric("Accuracy Difference", f"{(mii_acc - fewshot_acc)*100:+.1f}%")
+    
+    # Visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Accuracy comparison
+    methods = list(results.keys())
+    accuracies = [sum(results[m]["correct"])/len(results[m]["correct"]) for m in methods]
+    colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D']
+    
+    ax1.barh(methods, accuracies, color=colors)
+    ax1.set_xlabel('Accuracy', fontweight='bold')
+    ax1.set_title('Accuracy Comparison', fontweight='bold', fontsize=13)
+    ax1.set_xlim(0, 1)
+    for i, v in enumerate(accuracies):
+        ax1.text(v + 0.02, i, f'{v:.1%}', va='center', fontweight='bold')
+    
+    # Token usage
+    avg_tokens = [sum(results[m]["tokens"])/len(results[m]["tokens"]) for m in methods]
+    
+    ax2.barh(methods, avg_tokens, color=colors)
+    ax2.set_xlabel('Avg Tokens per Query', fontweight='bold')
+    ax2.set_title('Token Efficiency', fontweight='bold', fontsize=13)
+    for i, v in enumerate(avg_tokens):
+        ax2.text(v + 5, i, f'{v:.0f}', va='center', fontweight='bold')
+    
+    plt.tight_layout()
+    st.pyplot(fig)
+    
+    # Interpretation
+    with st.expander("📖 Understanding the Results"):
+        st.markdown(f"""
+### Key Findings (Based on Prompt-MII Paper)
 
-    # Detailed table
-    st.markdown("### Detailed Metrics Comparison")
-    rows = []
-    for name in methods.keys():
-        t = avg_tokens[name]
-        t_text = f"{t:.1f}" if t is not None else "N/A"
-        rows.append([name, f"{macro_acc[name]:.2%}", f"{macro_f1[name]:.2%}", t_text])
-    st.dataframe(pd.DataFrame(rows, columns=["Technique", "Accuracy", "F1", "Avg. Tokens"]), 
-                 use_container_width=True)
+**Prompt-MII** achieves:
+- **{mii_acc:.1%} accuracy** with **{mii_tokens:.0f} avg tokens**
+- **{(1 - mii_tokens/fewshot_tokens)*100:.0f}% fewer tokens** than Few-Shot prompting
+- Competitive accuracy with significantly lower API costs
 
-    # Visualizations
-    fig, axs = plt.subplots(1, 3, figsize=(18,6))
-    
-    # Cumulative Accuracy
-    for name, (preds, _) in methods.items():
-        axs[0].plot(pd.Series(preds).expanding().apply(lambda x: accuracy_score(y_true[:len(x)], x)), 
-                    label=name, linewidth=2)
-    axs[0].set_title("Cumulative Accuracy", fontsize=14, fontweight='bold')
-    axs[0].set_xlabel("Sample")
-    axs[0].set_ylabel("Accuracy")
-    axs[0].set_ylim(0, 1.01)
-    axs[0].legend()
-    axs[0].grid(alpha=0.3)
-    
-    # Cumulative F1
-    for name, (preds, _) in methods.items():
-        axs[1].plot(pd.Series(preds).expanding().apply(lambda x: f1_score(y_true[:len(x)], x, average='macro')), 
-                    label=name, linewidth=2)
-    axs[1].set_title("Cumulative Macro F1", fontsize=14, fontweight='bold')
-    axs[1].set_xlabel("Sample")
-    axs[1].set_ylabel("F1 Score")
-    axs[1].set_ylim(0, 1.01)
-    axs[1].legend()
-    axs[1].grid(alpha=0.3)
-    
-    # Token Usage
-    for name, (_, tok_col) in methods.items():
-        if tok_col:
-            axs[2].scatter([r[tok_col] for r in results], 
-                          range(len(results)), label=name, alpha=0.6, s
+**Method Comparison:**
+- **Prompt-MII**: Meta-learned compact instructions (optimal efficiency)
+- **Classic Few-Shot**: Multiple examples (highest tokens, baseline accuracy)
+- **Zero-Shot**: Minimal instruction (lowest tokens, often lower accuracy)
+- **Chain-of-Thought**: Reasoning-focused (good for complex tasks)
+
+**Business Impact:**  
+Token savings directly translate to lower API costs while maintaining competitive performance.
+
+**Reference**: [Prompt-MII: Meta-Instruction Induction](https://arxiv.org/abs/2510.16932)
+        """)
+
+st.markdown("---")
+st.caption("Built by Harshul | Prompt Engineering Research Demo | Based on arXiv:2510.16932")
