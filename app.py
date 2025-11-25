@@ -4,7 +4,7 @@ from datasets import load_dataset
 import random
 from sklearn.metrics import accuracy_score, f1_score
 import matplotlib.pyplot as plt
-import google.generativeai as genai
+from openai import OpenAI
 
 # === Core Prompting Methods (Based on Prompt-MII Paper) ===
 
@@ -32,27 +32,26 @@ def chain_of_thought_prompt(question, choices):
     """Reasoning-focused prompting"""
     return f"Question: {question}\nChoices: {', '.join(choices)}\n\nLet's think step by step to find the correct answer:"
 
-# === LLM Inference with Gemini-2.5-Flash ===
+# === OpenAI LLM Inference ===
 
-def gemini_inference(prompt, choices, api_key):
-    """Call Gemini API for real LLM predictions"""
+def openai_inference(prompt, choices, api_key, model="gpt-4o-mini"):
+    """Call OpenAI API for real LLM predictions"""
     try:
-        genai.configure(api_key=api_key)
-        
-        # Use the specified model
-        model = genai.GenerativeModel("models/gemini-2.5-flash")
+        client = OpenAI(api_key=api_key)
         
         full_prompt = f"{prompt}\n\nRespond with ONLY the letter (A, B, C, or D):"
         
-        response = model.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.1,
-                max_output_tokens=10,
-            )
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a precise academic assistant. Answer with only the letter choice."},
+                {"role": "user", "content": full_prompt}
+            ],
+            temperature=0.1,
+            max_tokens=10
         )
         
-        answer = response.text.strip().upper()
+        answer = response.choices[0].message.content.strip().upper()
         
         # Parse letter response
         if answer and answer[0] in 'ABCD':
@@ -89,13 +88,19 @@ Compare **Prompt-MII** (meta-learned compact instructions) against industry-stan
 - **Chain-of-Thought**: Step-by-step reasoning
 
 📊 **Evaluate**: Accuracy, F1 Score, and Token Efficiency on MMLU benchmark  
-🤖 **Using**: Gemini 2.5 Flash (Latest Model)
+🤖 **Using**: OpenAI GPT-4o-mini (Cost-efficient, high performance)
 """)
 
 # Sidebar
 st.sidebar.header("⚙️ Configuration")
-api_key = st.sidebar.text_input("Gemini API Key", type="password", 
-                                 help="Get free key: https://aistudio.google.com/app/apikey")
+api_key = st.sidebar.text_input("OpenAI API Key", 
+                                 value="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",
+                                 type="password", 
+                                 help="Your OpenAI API key")
+
+model_choice = st.sidebar.selectbox("OpenAI Model", 
+                                     ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
+                                     help="gpt-4o-mini recommended for cost efficiency")
 
 sample_size = st.sidebar.slider("Sample Size", 20, 100, 50, 10)
 mmlu_domain = st.sidebar.selectbox("MMLU Domain", 
@@ -105,8 +110,7 @@ few_shot_k = st.sidebar.slider("Few-Shot Examples (K)", 2, 5, 3)
 
 # Info boxes
 if not api_key:
-    st.info("💡 **Add your Gemini API key** in the sidebar to run real LLM evaluation")
-    st.info("🔑 Get your free API key at: https://aistudio.google.com/app/apikey")
+    st.info("💡 **Add your OpenAI API key** in the sidebar to run real LLM evaluation")
 
 # Run Benchmark
 if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
@@ -168,7 +172,7 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
         
         # Get predictions
         for method, prompt in prompts.items():
-            pred_idx = gemini_inference(prompt, choices, api_key)
+            pred_idx = openai_inference(prompt, choices, api_key, model=model_choice)
             
             if pred_idx is not None:
                 results[method]["predictions"].append(pred_idx)
@@ -262,7 +266,7 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
 Token savings directly translate to lower API costs while maintaining competitive performance.
 
 **Technical Details:**
-- Model: Gemini 2.5 Flash (Latest)
+- Model: {model_choice}
 - Dataset: MMLU ({mmlu_domain})
 - Evaluation: {len(results["Prompt-MII"]["predictions"])} samples
 
@@ -270,4 +274,4 @@ Token savings directly translate to lower API costs while maintaining competitiv
             """)
 
 st.markdown("---")
-st.caption("Built by Harshul | Prompt Engineering Research Demo | Gemini 2.5 Flash | Based on arXiv:2510.16932")
+st.caption(f"Built by Harshul | Prompt Engineering Research Demo | {model_choice} | Based on arXiv:2510.16932")
