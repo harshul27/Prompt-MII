@@ -32,17 +32,43 @@ def chain_of_thought_prompt(question, choices):
     """Reasoning-focused prompting"""
     return f"Question: {question}\nChoices: {', '.join(choices)}\n\nLet's think step by step to find the correct answer:"
 
-# === LLM Inference (FIXED MODEL NAME) ===
+# === LLM Inference (FIXED FOR CURRENT API) ===
 
 def gemini_inference(prompt, choices, api_key):
     """Call Gemini API for real LLM predictions"""
     try:
         genai.configure(api_key=api_key)
-        # Fixed: Use correct model identifier
-        model = genai.GenerativeModel("gemini-pro")
+        
+        # Try multiple model names for compatibility
+        model_names = [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro", 
+            "models/gemini-1.5-flash",
+            "models/gemini-pro"
+        ]
+        
+        model = None
+        for model_name in model_names:
+            try:
+                model = genai.GenerativeModel(model_name)
+                break
+            except:
+                continue
+        
+        if model is None:
+            st.error("Could not initialize any Gemini model. Check your API key.")
+            return None
         
         full_prompt = f"{prompt}\n\nRespond with ONLY the letter (A, B, C, or D):"
-        response = model.generate_content(full_prompt)
+        
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.1,
+                max_output_tokens=10,
+            )
+        )
+        
         answer = response.text.strip().upper()
         
         # Parse letter response
@@ -57,7 +83,7 @@ def gemini_inference(prompt, choices, api_key):
                 return i
                 
     except Exception as e:
-        st.error(f"API Error: {str(e)[:200]}")
+        st.warning(f"API Error: {str(e)[:200]}")
         return None
     
     return random.randint(0, len(choices)-1)
@@ -85,7 +111,19 @@ Compare **Prompt-MII** (meta-learned compact instructions) against industry-stan
 # Sidebar
 st.sidebar.header("⚙️ Configuration")
 api_key = st.sidebar.text_input("Gemini API Key", type="password", 
-                                 help="Get free key: https://makersuite.google.com/app/apikey")
+                                 help="Get free key: https://aistudio.google.com/app/apikey")
+
+# Add model checker
+if api_key and st.sidebar.button("🔍 Check Available Models"):
+    try:
+        genai.configure(api_key=api_key)
+        st.sidebar.write("**Available models:**")
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                st.sidebar.success(f"✓ {m.name}")
+    except Exception as e:
+        st.sidebar.error(f"Error: {e}")
+
 sample_size = st.sidebar.slider("Sample Size", 20, 100, 50, 10)
 mmlu_domain = st.sidebar.selectbox("MMLU Domain", 
                                     ["business_ethics", "college_biology", "high_school_mathematics", 
@@ -95,6 +133,7 @@ few_shot_k = st.sidebar.slider("Few-Shot Examples (K)", 2, 5, 3)
 # Info boxes
 if not api_key:
     st.info("💡 **Add your Gemini API key** in the sidebar to run real LLM evaluation")
+    st.info("🔑 Get your free API key at: https://aistudio.google.com/app/apikey")
 
 # Run Benchmark
 if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
@@ -134,11 +173,12 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
     
     progress = st.progress(0)
     status = st.empty()
+    error_count = 0
     
     # Evaluate each sample
     for idx, row in df.iterrows():
         progress.progress((idx + 1) / len(df))
-        status.text(f"Evaluating {idx + 1}/{len(df)}...")
+        status.text(f"Evaluating {idx + 1}/{len(df)}... (Errors: {error_count})")
         
         subject = row["subject"]
         question = row["question"]
@@ -161,9 +201,14 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
                 results[method]["predictions"].append(pred_idx)
                 results[method]["tokens"].append(count_tokens(prompt))
                 results[method]["correct"].append(1 if pred_idx == correct_idx else 0)
+            else:
+                error_count += 1
     
     progress.empty()
     status.empty()
+    
+    if error_count > 0:
+        st.warning(f"⚠️ Encountered {error_count} API errors during evaluation")
     
     # Calculate metrics
     st.markdown("## 📊 Results")
@@ -177,55 +222,56 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
                 "Method": method,
                 "Accuracy": f"{acc:.1%}",
                 "Avg Tokens": f"{avg_tokens:.0f}",
-                "Total Tokens": sum(data["tokens"])
+                "Samples": len(data["predictions"])
             })
     
     metrics_df = pd.DataFrame(metrics_data)
     st.dataframe(metrics_df, use_container_width=True, hide_index=True)
     
     # Key insights
-    col1, col2, col3 = st.columns(3)
-    
-    mii_acc = sum(results["Prompt-MII"]["correct"]) / len(results["Prompt-MII"]["correct"])
-    mii_tokens = sum(results["Prompt-MII"]["tokens"]) / len(results["Prompt-MII"]["tokens"])
-    
-    fewshot_acc = sum(results["Classic Few-Shot"]["correct"]) / len(results["Classic Few-Shot"]["correct"])
-    fewshot_tokens = sum(results["Classic Few-Shot"]["tokens"]) / len(results["Classic Few-Shot"]["tokens"])
-    
-    col1.metric("Prompt-MII Accuracy", f"{mii_acc:.1%}")
-    col2.metric("Token Savings vs Few-Shot", f"{(1 - mii_tokens/fewshot_tokens)*100:.1f}%")
-    col3.metric("Accuracy Difference", f"{(mii_acc - fewshot_acc)*100:+.1f}%")
-    
-    # Visualization
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
-    
-    # Accuracy comparison
-    methods = list(results.keys())
-    accuracies = [sum(results[m]["correct"])/len(results[m]["correct"]) for m in methods]
-    colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D']
-    
-    ax1.barh(methods, accuracies, color=colors)
-    ax1.set_xlabel('Accuracy', fontweight='bold')
-    ax1.set_title('Accuracy Comparison', fontweight='bold', fontsize=13)
-    ax1.set_xlim(0, 1)
-    for i, v in enumerate(accuracies):
-        ax1.text(v + 0.02, i, f'{v:.1%}', va='center', fontweight='bold')
-    
-    # Token usage
-    avg_tokens = [sum(results[m]["tokens"])/len(results[m]["tokens"]) for m in methods]
-    
-    ax2.barh(methods, avg_tokens, color=colors)
-    ax2.set_xlabel('Avg Tokens per Query', fontweight='bold')
-    ax2.set_title('Token Efficiency', fontweight='bold', fontsize=13)
-    for i, v in enumerate(avg_tokens):
-        ax2.text(v + 5, i, f'{v:.0f}', va='center', fontweight='bold')
-    
-    plt.tight_layout()
-    st.pyplot(fig)
-    
-    # Interpretation
-    with st.expander("📖 Understanding the Results"):
-        st.markdown(f"""
+    if len(results["Prompt-MII"]["correct"]) > 0 and len(results["Classic Few-Shot"]["correct"]) > 0:
+        col1, col2, col3 = st.columns(3)
+        
+        mii_acc = sum(results["Prompt-MII"]["correct"]) / len(results["Prompt-MII"]["correct"])
+        mii_tokens = sum(results["Prompt-MII"]["tokens"]) / len(results["Prompt-MII"]["tokens"])
+        
+        fewshot_acc = sum(results["Classic Few-Shot"]["correct"]) / len(results["Classic Few-Shot"]["correct"])
+        fewshot_tokens = sum(results["Classic Few-Shot"]["tokens"]) / len(results["Classic Few-Shot"]["tokens"])
+        
+        col1.metric("Prompt-MII Accuracy", f"{mii_acc:.1%}")
+        col2.metric("Token Savings vs Few-Shot", f"{(1 - mii_tokens/fewshot_tokens)*100:.1f}%")
+        col3.metric("Accuracy Difference", f"{(mii_acc - fewshot_acc)*100:+.1f}%")
+        
+        # Visualization
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+        
+        # Accuracy comparison
+        methods = list(results.keys())
+        accuracies = [sum(results[m]["correct"])/len(results[m]["correct"]) if results[m]["correct"] else 0 for m in methods]
+        colors = ['#2E86AB', '#A23B72', '#F18F01', '#C73E1D']
+        
+        ax1.barh(methods, accuracies, color=colors)
+        ax1.set_xlabel('Accuracy', fontweight='bold')
+        ax1.set_title('Accuracy Comparison', fontweight='bold', fontsize=13)
+        ax1.set_xlim(0, 1)
+        for i, v in enumerate(accuracies):
+            ax1.text(v + 0.02, i, f'{v:.1%}', va='center', fontweight='bold')
+        
+        # Token usage
+        avg_tokens = [sum(results[m]["tokens"])/len(results[m]["tokens"]) if results[m]["tokens"] else 0 for m in methods]
+        
+        ax2.barh(methods, avg_tokens, color=colors)
+        ax2.set_xlabel('Avg Tokens per Query', fontweight='bold')
+        ax2.set_title('Token Efficiency', fontweight='bold', fontsize=13)
+        for i, v in enumerate(avg_tokens):
+            ax2.text(v + 5, i, f'{v:.0f}', va='center', fontweight='bold')
+        
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        # Interpretation
+        with st.expander("📖 Understanding the Results"):
+            st.markdown(f"""
 ### Key Findings (Based on Prompt-MII Paper)
 
 **Prompt-MII** achieves:
@@ -243,9 +289,7 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
 Token savings directly translate to lower API costs while maintaining competitive performance.
 
 **Reference**: [Prompt-MII: Meta-Instruction Induction](https://arxiv.org/abs/2510.16932)
-        """)
+            """)
 
 st.markdown("---")
 st.caption("Built by Harshul | Prompt Engineering Research Demo | Based on arXiv:2510.16932")
-
-
