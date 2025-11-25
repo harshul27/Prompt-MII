@@ -3,4 +3,4 @@ pandas
 datasets
 scikit-learn
 matplotlib
-openai
+openai==1.12.0
