@@ -32,13 +32,14 @@ def chain_of_thought_prompt(question, choices):
     """Reasoning-focused prompting"""
     return f"Question: {question}\nChoices: {', '.join(choices)}\n\nLet's think step by step to find the correct answer:"
 
-# === LLM Inference ===
+# === LLM Inference (FIXED MODEL NAME) ===
 
 def gemini_inference(prompt, choices, api_key):
     """Call Gemini API for real LLM predictions"""
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # Fixed: Use correct model identifier
+        model = genai.GenerativeModel("gemini-pro")
         
         full_prompt = f"{prompt}\n\nRespond with ONLY the letter (A, B, C, or D):"
         response = model.generate_content(full_prompt)
@@ -56,7 +57,7 @@ def gemini_inference(prompt, choices, api_key):
                 return i
                 
     except Exception as e:
-        st.error(f"API Error: {str(e)[:150]}")
+        st.error(f"API Error: {str(e)[:200]}")
         return None
     
     return random.randint(0, len(choices)-1)
@@ -102,7 +103,7 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
     with st.spinner("Loading MMLU dataset..."):
         try:
             dataset = load_dataset("cais/mmlu", mmlu_domain, split="test")
-            dataset = dataset.shuffle(seed=42).select(range(sample_size))
+            dataset = dataset.shuffle(seed=42).select(range(min(sample_size, len(dataset))))
             df = pd.DataFrame(dataset)
             
             # Format data
@@ -114,7 +115,8 @@ if st.button("▶️ Run Benchmark", type="primary", disabled=not api_key):
             )
             
             # Filter valid samples
-            df = df[df["correct_answer"].apply(lambda x: x in df.loc[df.index[0], "choices"] if len(df) > 0 else False)]
+            df = df[df["correct_answer"] != ""]
+            df = df.reset_index(drop=True)
             
         except Exception as e:
             st.error(f"Dataset loading error: {e}")
@@ -245,3 +247,5 @@ Token savings directly translate to lower API costs while maintaining competitiv
 
 st.markdown("---")
 st.caption("Built by Harshul | Prompt Engineering Research Demo | Based on arXiv:2510.16932")
+
+
