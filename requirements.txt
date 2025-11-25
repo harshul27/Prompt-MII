@@ -3,4 +3,4 @@ pandas
 datasets
 scikit-learn
 matplotlib
-google-generativeai
+openai
