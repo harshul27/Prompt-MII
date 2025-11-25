@@ -1,8 +1,6 @@
-openai>=1.0.0
 streamlit
-scikit-learn
 pandas
-numpy
-matplotlib
 datasets
-
+scikit-learn
+matplotlib
+google-generativeai
